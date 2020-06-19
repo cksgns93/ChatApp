@@ -51,12 +51,47 @@ public class JavaChatHandler extends Thread {
 					String sendMsg="100|"+userId+"|"+chatName;
 					sendMessageAll(sendMsg);
 				}
+			}//100인 경우
+			
+			while(true) {
+				//클이 보내오는 메시지를 계속 듣고 그 내용을 분석해서 로직별로 처리하자.
+				String cMsg=in.readUTF();
+				process(cMsg);
 			}
 			
 		}catch(IOException e) {
 			System.out.println("JavaChatHandler run()에서 예외: "+e);
 		}
 	}
+	//프로토콜 별로 로직을 처리하는 메소드
+	private void process(String cMsg) {
+		System.out.println(cMsg);
+		String tks[]=cMsg.split("\\|");
+		switch(tks[0]) {
+			case "400":{//클=>서버 "400|보내는사람의대화명|글자색|메시지"
+				String fntRgb=tks[1];
+				String message=tks[2];
+				sendMessageAll("400|"+chatName+"|"+fntRgb+"|"+message);			
+			}break;
+			case "500":{//클=>서버 "500|toChatName|귓속말메시지"
+				String toChatName=tks[1];
+				String oneMsg=tks[2];
+				for(JavaChatHandler userChat:userV) {
+					if(userChat.chatName.equals(toChatName)) {
+						String str="500|"+this.chatName+"|"+oneMsg;
+						//500|보내는사람의대화명|귓속말메시지
+						try {
+							userChat.sendMessageTo(str);
+						} catch (IOException e) {
+							userV.remove(userChat);
+							break;
+						}
+					}
+				}
+			}break;
+		}
+	}
+
 	/*서버에 접속해 있는 모든 클에게 메시지를 보내는 메소드
 	 * */
 	private synchronized void sendMessageAll(String sendMsg) {

@@ -11,6 +11,7 @@ import javax.swing.table.DefaultTableModel;
 
 import java.net.*;
 import java.awt.Color;
+import java.awt.event.ItemEvent;
 import java.io.*;
 import javax.swing.text.*;
 /**
@@ -36,11 +37,15 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
 	public static final int LOGIN=0;
 	public static final int ENTER=1;
 	public static final int LOGOUT=-1;
-	
+	public static final int EXIT=-2;
+	StyledDocument doc;//텍스트페인의 문서모델
+	SimpleAttributeSet attr;
     public JavaChatGui() {
     	setTitle("Chanqun Chat v1.1");
         initComponents();
+        userModel=(DefaultTableModel)userTable.getModel();
         this.tabEnable(LOGIN, ENTER);//로그인 패널 활성화, 채팅방 패널은 비활성화
+        this.doc=tpMsg.getStyledDocument();
     }
     /*탭페인의 활성화 여부를 결정하는 메소드
      * */
@@ -48,6 +53,12 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
     	tabPane.setEnabledAt(enable,true);
     	tabPane.setEnabledAt(disable,false);
     	tabPane.setSelectedIndex(enable);
+    	if(enable==ENTER) {//채팅패널이 활성화 되었다면
+    		tfInput.requestFocus();
+    		//대화메시지 입력창에 입력 포커스 추가.
+    	}else if(enable==LOGIN) {
+    		tfId.requestFocus();
+    	}
     }
     /**
      * This method is called from within the constructor to initialize the form.
@@ -424,6 +435,7 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
     		return;
     	}
     	//3. 채팅 입장
+    	isStop=false;
     	chatEnter();
     	tabEnable(ENTER, LOGIN);
     	//채팅방은 활성화 로그인패널은 비활성화
@@ -475,17 +487,90 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
 				userModel=(DefaultTableModel)userTable.getModel();
 				String[] rowData= {tokens[1],tokens[2]};
 				userModel.addRow(rowData);
-				break;
-			}
+				
+			}break;
+		case "400":
+			{
+				String from=tokens[1];
+				String fntRgb=tokens[2];
+				String fromMsg=tokens[3];
+				showChat(from,fntRgb,fromMsg);
+			}break;
+		case "500":
+			{//500|from대화명|귓속말메시지
+				String from=tokens[1];
+				String oneMsg=tokens[2];
+				String str="["+from+"]님이 보낸 귓속말>>"+oneMsg+"\r\n";
+				showChat(Color.pink,Color.blue,str);
+			}break;
 		case "700":
 			{//대화명이 중복될 경우
 				showMsg(chatName+"이란 대화명은 이미 존재");
-				//
-				break;
-			}
+				//LOGOUT값이 넘어오면 퇴장처리, EXIT값이 오면 종료처리
+				exitChat(LOGOUT);
+			}break;
 		}
 	}//parsing()-------------------
-
+	/*클라이언트가 전달한 메시지를 JTextPane에 스타일을 적용하여 표현하는 메소드*/
+	private void showChat(String from, String fontRgb, String fromMsg) {
+		synchronized(this) {
+			int rgb=Integer.parseInt(fontRgb.trim());//글자색
+			attr=new SimpleAttributeSet();
+			StyleConstants.setForeground(attr, new Color(rgb));
+			StyleConstants.setFontSize(attr, 16);
+			StyleConstants.setFontFamily(attr,"sans-serif");
+			
+			int offset=doc.getEndPosition().getOffset()-1;
+			tpMsg.setCaretPosition(offset);
+			String msg=from+">>"+fromMsg+"\n";
+			try {
+				doc.insertString(offset, msg, attr);
+			} catch (BadLocationException e) {
+				System.out.println("showChat() 예외:"+e);
+			}
+		}
+	}
+	//귓속말
+	private synchronized void showChat(Color bgCr, Color fgCr, String msg) {
+		attr=new SimpleAttributeSet();
+		StyleConstants.setForeground(attr,fgCr);
+		StyleConstants.setBackground(attr,bgCr);
+		StyleConstants.setFontSize(attr, 16);
+		tpMsg.setCaretPosition(doc.getEndPosition().getOffset()-1);
+		int offset=tpMsg.getCaretPosition();
+		try {
+			doc.insertString(offset, msg, attr);
+		} catch (BadLocationException e) {
+			System.out.println("showChat() 예외:"+e);
+		}
+	}
+	private void exitChat(int mode) {
+		try {
+			isStop=true;
+			lbId.setText("");
+			lbChatName.setText("");
+			if(out!=null) out.close();
+			if(in!=null) in.close();
+			if(sock!=null) {
+				sock.close();
+				sock=null;
+			}
+			switch(mode) {
+			case LOGOUT://퇴장인 경우
+				userModel.setDataVector(null, new String[] {"아이디","대화명"});
+				this.tabEnable(LOGIN, ENTER);
+				//로그인탭 활성화, 채팅방은 비활성화
+				break;
+			case EXIT://종료인 경우
+				this.dispose();
+				System.exit(0);
+				break;
+			}
+		}catch(Exception e){
+			System.out.println("exitChat()에서 예외: "+e);
+			e.printStackTrace();
+		}
+	}
 	public void showMsg(String msg) {
     	JOptionPane.showMessageDialog(this, msg);
     }
@@ -506,15 +591,76 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
     }//GEN-LAST:event_btExitActionPerformed
 
     private void tfInputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_tfInputActionPerformed
-        // TODO add your handling code here:
+    	//tfInput에 입력한 값 얻어오기
+    	String sendMsg=tfInput.getText();
+    	if(sendMsg==null||sendMsg.trim().isEmpty()){
+    		sendMsg=" ";
+    	}
+    	sendMessage(sendMsg);
+    	tfInput.setText("");
+    	tfInput.requestFocus();
     }//GEN-LAST:event_tfInputActionPerformed
+    //서버쪽에 메시지 보내는 메소드
+    private void sendMessage(String msg) {
+    	//프로토콜에서 사용하는 구분 문자 만약 채팅참여자가 대화내용 중에 '|'를 보내면 프로토콜이 망가진다.
+    	//msg중에 | 문자가 있으면 비스한 문자로 대치. 'l','ㅣ';
+    	msg=msg.replace('|', 'ㅣ');
+    	try {
+    		if(isSendOne) {
+    			//귓속말인 경우
+    			//1. userTable에서 귀속말할 대상자를 선택해야 함
+    			int row=userTable.getSelectedRow();
+    			if(row<0) {//선택한 행이 없으면 -1 반환함
+    				showMsg("귓속말할 대상을 선택하세요");
+    				return;
+    			}
+    			//500|받을사람대화명|귓속말메시지
+    			String toChatName=userTable.getValueAt(row, 1).toString();
+    			if(this.chatName.equals(toChatName)) {
+    				showMsg("본인에게는 귓속말을 보낼 수 없습니다.");
+    				return;
+    			}
+    			String sendMsg="500|"+toChatName+"|"+msg;
+    			out.writeUTF(sendMsg);
+    			out.flush();
+    			String str="["+toChatName+"]님에게 보내는 귓속말>>"+msg+"\r\n";
+    			showChat(Color.yellow,new Color(227,0,227),str);
+    		}else {
+    			//일반 대화인 경우
+    			int rgb=fontCr.getRGB();
+    			String sendMsg="400|"+rgb+"|"+msg;
+    			out.writeUTF(sendMsg);;
+    			out.flush();
+    		}
+    		
+		} catch (IOException e) {
+			System.out.println("sendMessage()예외: "+e);
+		}
+    	
+	}
+    //귓속말일때 스타일을 적용해서 보여주는 메소드
 
-    private void chkItemStateChanged(java.awt.event.ItemEvent evt) {//GEN-FIRST:event_chkItemStateChanged
-        // TODO add your handling code here:
-    }//GEN-LAST:event_chkItemStateChanged
+	private void chkItemStateChanged(java.awt.event.ItemEvent evt) {//GEN-FIRST:event_chkItemStateChanged
+		int state = evt.getStateChange();
+		if(state==ItemEvent.SELECTED) {//귓속말
+			isSendOne=true;
+		}else {//일반대화
+			isSendOne=false;
+		}
+	}//GEN-LAST:event_chkItemStateChanged
 
     private void comboColorItemStateChanged(java.awt.event.ItemEvent evt) {//GEN-FIRST:event_comboColorItemStateChanged
-        // TODO add your handling code here:
+    	int state = evt.getStateChange();
+    	if(state==ItemEvent.SELECTED) {
+    		int idx= comboColor.getSelectedIndex();
+        	switch(idx) {
+	        	case 0: fontCr=Color.black;break;    	
+	        	case 1: fontCr=Color.blue;break;    	
+	        	case 2: fontCr=Color.red;break;    	
+	        	case 3: fontCr=Color.green;break;    	
+        	}
+        	lb.setForeground(fontCr);
+    	}
     }//GEN-LAST:event_comboColorItemStateChanged
 
     private void btEmotiActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btEmotiActionPerformed
