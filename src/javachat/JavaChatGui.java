@@ -6,14 +6,30 @@
 
 package javachat;
 
+import java.awt.Color;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.GridLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.ItemEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.net.Socket;
+
+import javax.swing.ImageIcon;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.table.DefaultTableModel;
-
-import java.net.*;
-import java.awt.Color;
-import java.awt.event.ItemEvent;
-import java.io.*;
-import javax.swing.text.*;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
+import javax.swing.text.StyledDocument;
 /**
  *
  * @author chanqun
@@ -40,12 +56,43 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
 	public static final int EXIT=-2;
 	StyledDocument doc;//텍스트페인의 문서모델
 	SimpleAttributeSet attr;
+	
+	//이코티콘 팝업 프레입 구성
+	ImageIcon emo1 = new ImageIcon(this.getClass().getResource("/images/emo1.PNG"));
+	ImageIcon emo2 = new ImageIcon(this.getClass().getResource("/images/emo2.PNG"));
+	ImageIcon emo3 = new ImageIcon(this.getClass().getResource("/images/emo3.PNG"));
+	ImageIcon emo4 = new ImageIcon(this.getClass().getResource("/images/emo4.PNG"));
+	ImageIcon emo5 = new ImageIcon(this.getClass().getResource("/images/emo5.PNG"));
+	ImageIcon emo6 = new ImageIcon(this.getClass().getResource("/images/emo5.PNG"));
+	
+	ImageIcon [] icons = {emo1,emo2,emo3,emo4,emo5,emo6};
+	JButton [] bt = new JButton[icons.length];
+	JFrame popF = new JFrame("Emoticon");
+	
     public JavaChatGui() {
     	setTitle("Chanqun Chat v1.1");
         initComponents();
         userModel=(DefaultTableModel)userTable.getModel();
         this.tabEnable(LOGIN, ENTER);//로그인 패널 활성화, 채팅방 패널은 비활성화
         this.doc=tpMsg.getStyledDocument();
+        Container cp = popF.getContentPane();
+        cp.setLayout(new GridLayout(2,0));
+        //2행은 고정, 열은 가변적으로 
+        for(int i=0;i<icons.length;i++) {
+        	bt[i]=new JButton(icons[i]);
+        	cp.add(bt[i]);
+        	bt[i].setActionCommand(String.valueOf(i));
+        	bt[i].addActionListener(new ActionListener() {
+        		public void actionPerformed(ActionEvent e) {
+        			try {
+        				out.writeUTF("300|"+e.getActionCommand());
+        				out.flush();
+        			}catch(Exception e2){
+        				System.out.println("이모티콘 보내는중 예외: "+e);
+        			}
+        		}
+        	});
+        }
     }
     /*탭페인의 활성화 여부를 결정하는 메소드
      * */
@@ -102,8 +149,15 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
         btLogout = new javax.swing.JButton();
         btExit = new javax.swing.JButton();
 
-        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
-
+        setDefaultCloseOperation(javax.swing.WindowConstants.DO_NOTHING_ON_CLOSE);
+        //창닫기 이벤트 처리
+        addWindowListener(new WindowAdapter() {
+        	public void windowClosing(WindowEvent e) {
+        		isStop=true;
+        		exitProcess();
+        	}
+        });
+        
         jPanel1.setBackground(new java.awt.Color(204, 204, 204));
         jPanel1.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 0, 0), 4, true));
 
@@ -487,21 +541,29 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
 				userModel=(DefaultTableModel)userTable.getModel();
 				String[] rowData= {tokens[1],tokens[2]};
 				userModel.addRow(rowData);
-				
+			}break;
+		case "300":
+			{//300|대화명|이모티콘번호
+				String from=tokens[1];
+				String emoNo=tokens[2];
+				int i = Integer.parseInt(emoNo.trim());
+				showEmoticon(from,icons[i]);
 			}break;
 		case "400":
 			{
 				String from=tokens[1];
 				String fntRgb=tokens[2];
 				String fromMsg=tokens[3];
-				showChat(from,fntRgb,fromMsg);
+				//showChat(from,fntRgb,fromMsg);
+				showCacaoStyle(from,fntRgb,fromMsg);
 			}break;
 		case "500":
 			{//500|from대화명|귓속말메시지
 				String from=tokens[1];
 				String oneMsg=tokens[2];
 				String str="["+from+"]님이 보낸 귓속말>>"+oneMsg+"\r\n";
-				showChat(Color.pink,Color.blue,str);
+				//showChat(Color.pink,Color.blue,str);
+				showCacaoStyle("other",Color.pink,Color.blue,str);
 			}break;
 		case "700":
 			{//대화명이 중복될 경우
@@ -509,8 +571,125 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
 				//LOGOUT값이 넘어오면 퇴장처리, EXIT값이 오면 종료처리
 				exitChat(LOGOUT);
 			}break;
+		case "800":{
+			String logoutId=tokens[1];
+			String logoutChatName=tokens[2];
+			logout(logoutId,logoutChatName,LOGOUT);
+			}break;
+		case "900":{
+			String exitId=tokens[1];
+			String exitChatName=tokens[2];
+			logout(exitId,exitChatName,EXIT);
+			}break;	
 		}
 	}//parsing()-------------------
+	private synchronized void showCacaoStyle(String who, Color bgCr, Color fgCr, String msg) {
+		//who (me:내가보낼때, other:다른이가 보낼때)
+		JLabel lb= new JLabel(msg);
+		lb.setOpaque(true);//라벨에 배경색을 적용시키려면 투명하게
+		lb.setPreferredSize(new Dimension(700,50));
+		lb.setForeground(fgCr);
+		lb.setBackground(bgCr);
+		if(who.equals("me")) {
+			//내가보낸 귓속말일 경우=> 오른쪽 정렬
+			attr=new SimpleAttributeSet();
+			StyleConstants.setAlignment(attr, StyleConstants.ALIGN_RIGHT);
+		}else {
+			//other -내가 귓속말을 받을 경우=>왼쪽 정렬
+			attr=new SimpleAttributeSet();
+			StyleConstants.setAlignment(attr, StyleConstants.ALIGN_LEFT);
+		}
+		setStyle(lb,msg,attr);
+	}
+	//대화 메시지를 스타일 적용하여 라벨 형태로 출려하는 메소드
+	private synchronized void showCacaoStyle(String from, String fntRgb, String fromMsg) {
+		String msg ="  "+from+">>"+fromMsg+"  \r\n";
+		JLabel lb = new JLabel(msg);
+		lb.setOpaque(true);
+		lb.setPreferredSize(new Dimension(700,50));
+		lb.setForeground(fontCr);
+		if(from.contentEquals(this.chatName)) {
+			//보낸이가 나라면 오른쪽에, 배경색은 노란색
+			attr=new SimpleAttributeSet();
+			StyleConstants.setAlignment(attr, StyleConstants.ALIGN_RIGHT);
+			lb.setBackground(Color.yellow);
+		}else {
+			//보낸이가 다른이라면 왼쪽에, 배경색은 다른색
+			attr=new SimpleAttributeSet();
+			StyleConstants.setAlignment(attr, StyleConstants.ALIGN_LEFT);
+			lb.setBackground(new Color(80,125,200));
+		}
+		setStyle(lb,msg,attr);
+	}
+	//텍스트페인에 이모티콘을 출력해 보여주는 메소드
+	private synchronized void showEmoticon(String from, ImageIcon icon) {
+
+		String msg="["+from+"]님\r\n";
+		JLabel lb2 = new JLabel(msg,icon,JLabel.CENTER);
+		lb2.setPreferredSize(new Dimension(700,190));
+		//lb의 폭은 700,높이 90 폭은 문자열만큼 차지함
+		lb2.setHorizontalTextPosition(JLabel.CENTER);
+		lb2.setVerticalTextPosition(JLabel.TOP);
+		
+
+		if(from.equals(this.chatName)) {
+			//보낸이가 나라면 라벨을 오른쪽에 보여주기
+			attr=new SimpleAttributeSet();
+			StyleConstants.setAlignment(attr, StyleConstants.ALIGN_RIGHT);
+		}else {
+			//보낸이가 다른이라면 라벨을 왼쪽에 보여주기
+			attr=new SimpleAttributeSet();
+			StyleConstants.setAlignment(attr, StyleConstants.ALIGN_LEFT);
+		}
+		setStyle(lb2,msg,attr);
+	}
+	//텍스트페인에 스타일 적용하여 라벨 끼워넣는 메소드
+	private void setStyle(JLabel lb2, String msg, SimpleAttributeSet attr2) {
+		int offset = doc.getEndPosition().getOffset()-1;
+		tpMsg.setCaretPosition(offset);
+		tpMsg.insertComponent(lb2);
+		//JLabel은 문자열, 아이콘 형태 등 다양하게 표현 가능
+		String enter="\r\n";//엔터값 끼워넣기 (줄바꿈 하도록)
+		offset=tpMsg.getCaretPosition();
+		try {
+			doc.insertString(offset, enter, attr);
+		} catch (BadLocationException e) {
+			System.out.println("setStyle()예외 :"+e);
+		}
+		//문단정렬방식
+		doc.setParagraphAttributes(offset+2, msg.length(), attr, true);
+		tpMsg.setCaretPosition(offset+2);
+	}
+	private void logout(String Id, String ChatName, int mode) {
+		//1.퇴장하는 클이 본인이 아닐 경우
+		//userModel에서 퇴장하는 클의 id를 제거하고 
+		//tpMsg에 "...님이 퇴장합니다"를 출력
+		String exitId="",exitCname="";
+		for(int i=0;i<userModel.getRowCount();i++) {
+			String cid = userModel.getValueAt(i, 0).toString();
+			if(cid.equals(Id)) {
+				//클의 아이디와 퇴장하려는 사람의 Id가 같다면
+				//userModel에서 제거
+				exitId=cid;
+				exitCname=userModel.getValueAt(i, 1).toString();
+				userModel.removeRow(i);
+				break;
+			}
+		}
+		if(mode==LOGOUT) {//로그아웃인 경우
+			String str=Id+"["+ChatName+"]님이 퇴장하였습니다.\r\n";
+			this.showChat(Color.white, Color.red, str);
+		}else if(mode==EXIT) {//종료인 경우
+			String str=Id+"["+ChatName+"]님이 접속을 종료하였습니다.\r\n";
+			this.showChat(Color.red, Color.white, str);
+		}
+		//2.퇴장하는 클이 본인일 경우
+		if(exitId.equals(this.userId)) {
+			isStop=true;
+			this.exitChat(mode);
+		}
+		
+	}
 	/*클라이언트가 전달한 메시지를 JTextPane에 스타일을 적용하여 표현하는 메소드*/
 	private void showChat(String from, String fontRgb, String fromMsg) {
 		synchronized(this) {
@@ -579,18 +758,48 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
     }//GEN-LAST:event_btCancelActionPerformed
 
     private void btLogoutActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btLogoutActionPerformed
-        // TODO add your handling code here:
+    	int yn = showConfirmMsg("퇴장할까요?");
+    	if(yn==JOptionPane.YES_OPTION&&out!=null) {
+    		try {
+				out.writeUTF("800|"+userId+"|"+chatName);
+				out.flush();
+			} catch (IOException e) {
+				System.out.println("퇴장 중 예외: "+e);
+			}
+    	}
     }//GEN-LAST:event_btLogoutActionPerformed
 
-    private void btRenameActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btRenameActionPerformed
+    private int showConfirmMsg(String msg) {
+    	int n = JOptionPane.showConfirmDialog(this, msg,"confirm",JOptionPane.YES_NO_OPTION);
+		return n;
+	}
+	private void btRenameActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btRenameActionPerformed
         // TODO add your handling code here:
     }//GEN-LAST:event_btRenameActionPerformed
 
     private void btExitActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btExitActionPerformed
-        // TODO add your handling code here:
+    	exitProcess();
     }//GEN-LAST:event_btExitActionPerformed
 
-    private void tfInputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_tfInputActionPerformed
+    private void exitProcess() {
+    	int yn=showConfirmMsg("종료할까요?");
+    	if(yn==JOptionPane.YES_OPTION) {
+    		if(sock!=null) {
+    			//1)채팅 서버에 접속하고 종료하는 경우
+    			try {
+    				out.writeUTF("900|"+userId+"|"+chatName);
+    				out.flush();
+    			}catch(Exception e){
+    				System.out.println("접속 종료 중 예외:"+e);
+    			}
+    		}else {
+    			//2)채팅 서버에 접속하지 않고 종료하는 경우
+    			System.exit(0);
+    		}
+    		
+    	}
+	}
+	private void tfInputActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_tfInputActionPerformed
     	//tfInput에 입력한 값 얻어오기
     	String sendMsg=tfInput.getText();
     	if(sendMsg==null||sendMsg.trim().isEmpty()){
@@ -620,11 +829,12 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
     				showMsg("본인에게는 귓속말을 보낼 수 없습니다.");
     				return;
     			}
-    			String sendMsg="500|"+toChatName+"|"+msg;
+    			String sendMsg="500|"+toChatName+"|"+msg+"\r\n";
     			out.writeUTF(sendMsg);
     			out.flush();
     			String str="["+toChatName+"]님에게 보내는 귓속말>>"+msg+"\r\n";
-    			showChat(Color.yellow,new Color(227,0,227),str);
+    			//showChat(Color.yellow,new Color(227,0,227),str);
+    			showCacaoStyle("me", Color.yellow,new Color(227,0,227), str);
     		}else {
     			//일반 대화인 경우
     			int rgb=fontCr.getRGB();
@@ -664,7 +874,10 @@ public class JavaChatGui extends javax.swing.JFrame implements Runnable {
     }//GEN-LAST:event_comboColorItemStateChanged
 
     private void btEmotiActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btEmotiActionPerformed
-        // TODO add your handling code here:
+    	popF.pack();
+    	popF.setLocation(this.getWidth(),0);
+    	popF.setVisible(true);
+    
     }//GEN-LAST:event_btEmotiActionPerformed
 
     private void userTableMousePressed(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_userTableMousePressed

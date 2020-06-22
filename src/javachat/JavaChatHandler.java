@@ -12,6 +12,7 @@ public class JavaChatHandler extends Thread {
 	String userId, chatName;
 	ObjectInputStream in;
 	ObjectOutputStream out;
+	boolean isStop=false;
 	
 	public JavaChatHandler(Socket sock, Vector<JavaChatHandler> userV) {
 		this.sock = sock;
@@ -32,6 +33,7 @@ public class JavaChatHandler extends Thread {
 			String []tokens=str.split("\\|");
 			int protocol = Integer.parseInt(tokens[0]);
 			if(protocol==100) {
+				isStop=false;
 				this.userId=tokens[1];
 				//대화명 중복 여부를 체크
 				boolean isExist = isDuplicatedChatName(tokens[2]);
@@ -53,7 +55,7 @@ public class JavaChatHandler extends Thread {
 				}
 			}//100인 경우
 			
-			while(true) {
+			while(!isStop) {
 				//클이 보내오는 메시지를 계속 듣고 그 내용을 분석해서 로직별로 처리하자.
 				String cMsg=in.readUTF();
 				process(cMsg);
@@ -68,6 +70,12 @@ public class JavaChatHandler extends Thread {
 		System.out.println(cMsg);
 		String tks[]=cMsg.split("\\|");
 		switch(tks[0]) {
+			case "300":{//클=>서버 "300|이모티콘번호"
+				String emoNo=tks[1];
+				sendMessageAll("300|"+chatName+"|"+emoNo);
+				//300|보내는사람대화명|이모티콘번호를 모든 참여자에게 보낸다.
+				
+			}break;
 			case "400":{//클=>서버 "400|보내는사람의대화명|글자색|메시지"
 				String fntRgb=tks[1];
 				String message=tks[2];
@@ -89,6 +97,36 @@ public class JavaChatHandler extends Thread {
 					}
 				}
 			}break;
+			case "800":{//클=>서버에게 "800|퇴장한는사람Id|대화명"
+				String logoutId=tks[1];
+				String logoutChatName=tks[2];
+				sendMessageAll("800|"+logoutId+"|"+logoutChatName);
+				//userV에서 JavaChatHandler를 제거
+				userV.remove(this);
+				closeAll();
+			}break;
+			case "900":{//클=>서버에게 "800|종료한는사람Id|대화명"
+				String exitId=tks[1];
+				String exitChatName=tks[2];
+				sendMessageAll("900|"+exitId+"|"+exitChatName);
+				//userV에서 JavaChatHandler를 제거
+				userV.remove(this);
+				closeAll();
+			}break;
+		}
+	}
+
+	private void closeAll() {
+		try{
+			isStop=true;
+			if(in!=null) in.close();
+			if(out!=null) out.close();
+			if(sock!=null) {
+				sock.close();
+				sock=null;
+			}
+		}catch(Exception e) {
+			System.out.println("closeAll()에서 예외: "+e);
 		}
 	}
 
